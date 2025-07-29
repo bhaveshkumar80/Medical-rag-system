@@ -1,48 +1,57 @@
-import asyncio
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
-from langchain_community.chat_models import ChatOllama
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_ollama.llms import OllamaLLM
+from langchain.chains import RetrievalQA, LLMChain
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+from pydantic import BaseModel, Field
+from retriever import get_retriever
 
-file_path = "data/10050-medicare-and-you_0.pdf"
 
-async def data_loader(file_path):
-    loader = PyPDFLoader(file_path)
-    pages = []
-    async for page in loader.alazy_load():
-        pages.append(page)
 
-    return pages
+def configure_llm():
+    llm = OllamaLLM(model="llama3.2")
+    return llm
 
-def configure_embedding_model():
-    embedding_model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-    return embedding_model
+def prompt_template():
+    prompt = PromptTemplate(
+        template="""You are a helpful assistant for a medical domain. You need to answer medical related queries from the given context.
 
-async def split_into_chunks(file_path, chunk_size=1000, chunk_overlap=200):
-    # Step 1: Load pages
-    pages = await data_loader(file_path)
+        Instructions:
+        1. If the context is insufficient, just say "Context is insufficiant for answer".
+        2. Your focus is to provide clear, concise and correct answer.
+        3. Strictly follow the context for user queries.
+        4. Answer should strictly follows the json format.
 
-    # Step 2: Initialize the text splitter
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+        Output Schema:
+        "answer": <response>
+
+        Context:
+        {context}
+
+        Question:
+        {question} 
+    """,
+    input_variables = ['context', 'question']
     )
+    return prompt
 
-    # Step 3: Split the documents
-    chunks = text_splitter.split_documents(pages)
+def cosine_similarity_score(result, question):
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    emb1 = model.encode([result])[0]
+    emb2 = model.encode([question])[0]
+    return cosine_similarity([emb1], [emb2])[0][0]
 
-    # Step 4: Generate the embeddings
-    embedding_model = configure_embedding_model()
-    vectorstore = FAISS.from_documents(chunks, embedding_model)
-
-    return vectorstore
+def evaluate_chunks(retrieved_context, question):
+    score = cosine_similarity_score(retrieved_context, question)
+    return score
 
 
-if __name__ == "__main__":
-    vs = asyncio.run(split_into_chunks(file_path))
-    print(vs)
+    
+    
+
+
 
 
 
